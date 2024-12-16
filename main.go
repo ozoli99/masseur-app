@@ -11,6 +11,10 @@ import (
 )
 
 func main() {
+    if err := initDatabase(); err != nil {
+        log.Fatalf("Error initializing database: %v", err)
+    }
+
     http.Handle("/", http.FileServer(http.Dir("./static")))
     
     http.HandleFunc("/appointments", appointmentsHandler)
@@ -23,6 +27,30 @@ func main() {
 func appointmentsHandler(w http.ResponseWriter, r *http.Request) {
     switch r.Method {
         case http.MethodGet:
+            rows, err := database.Query("SELECT id, customer_name, time, duration, notes FROM appointments")
+            if err != nil {
+                http.Error(w, err.Error(), http.StatusInternalServerError)
+                return
+            }
+            defer rows.Close()
+
+            var result []Appointment
+            for rows.Next() {
+                var a Appointment
+                var t string
+                if err := rows.Scan(&a.ID, &a.CustomerName, &t, &a.Duration, &a.Notes); err != nil {
+                    http.Error(w, err.Error(), http.StatusInternalServerError)
+                    return
+                }
+
+                parsedTime, err := time.Parse(time.RFC3339, t)
+                if err != nil {
+                    parsedTime = time.Now()
+                }
+                a.Time = parsedTime
+                result = append(result, a)
+            }
+
             w.Header().Set("Content-Type", "application/json")
             json.NewEncoder(w).Encode(appointments)
         case http.MethodPost:
@@ -31,13 +59,25 @@ func appointmentsHandler(w http.ResponseWriter, r *http.Request) {
                 http.Error(w, err.Error(), http.StatusBadRequest)
                 return
             }
-            a.ID = nextID
-            nextID++
             if a.Time.IsZero() {
                 a.Time = time.Now()
             }
-            appointments = append(appointments, a)
+
+            res, err := database.Exec("INSERT INTO appointments (customer_name, time, duration, notes) VALUES (?, ?, ?, ?)",a.CustomerName, a.Time.Format(time.RFC3339), a.Duration, a.Notes)
+            if err != nil {
+                http.Error(w, err.Error(), http.StatusInternalServerError)
+                return
+            }
+
+            id, err := res.LastInsertId()
+            if err != nil {
+                http.Error(w, err.Error(), http.StatusInternalServerError)
+                return
+            }
+            a.ID = int(id)
+
             w.WriteHeader(http.StatusCreated)
+            w.Header().Set("Content-Type", "application/json")
             json.NewEncoder(w).Encode(a)
         default:
             http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -58,35 +98,46 @@ func appointmentHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    idx := -1
-    for i, ap := range appointments {
-        if ap.ID == id {
-            idx = i
-            break
-        }
-    }
-
-    if idx == -1 {
-        http.Error(w, "Not Found", http.StatusNotFound)
-        return
-    }
-
     switch r.Method {
         case http.MethodGet:
+            var a Appointment
+            var t string
+            err := database.QueryRow("SELECT id, customer_name, time, duration, notes FROM appointments WHERE id = ?", id).Scan(&a.ID, &a.CustomerName, &t, &a.Duration, &a.Notes)
+            if err != nil {
+                http.Error(w, "Not Found", http.StatusNotFound)
+            }
+            aTime, err := time.Parse(time.RFC3339, t)
+            if err == nil {
+                a.Time = aTime
+            }
+
             w.Header().Set("Content-Type", "application/json")
-            json.NewEncoder(w).Encode(appointments[idx])
+            json.NewEncoder(w).Encode(a)
         case http.MethodPut:
             var updated Appointment
             if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
                 http.Error(w, err.Error(), http.StatusBadRequest)
                 return
             }
-            updated.ID = appointments[idx].ID
-            appointments[idx] = updated
+            if updated.Time.IsZero() {
+                updated.Time = time.Now()
+            }
+
+            _, err := database.Exec("UPDATE appointments SET customer_name = ?, time = ?, duration = ?, notes = ? WHERE id = ?", updated.CustomerName, updated.Time.Format(time.RFC3339), updated.Duration, updated.Notes, id)
+            if err != nil {
+                http.Error(w, err.Error(), http.StatusInternalServerError)
+                return
+            }
+
+            updated.ID = id
             w.Header().Set("Content-Type", "application/json")
             json.NewEncoder(w).Encode(updated)
         case http.MethodDelete:
-            appointments = append(appointments[:idx], appointments[idx+1:]...)
+            _, err := database.Exec("DELETE FROM appointments WHERE id = ?", id)
+            if err != nil {
+                http.Error(w, err.Error(), http.StatusInternalServerError)
+                return
+            }
             w.WriteHeader(http.StatusNoContent)
         default:
             http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
