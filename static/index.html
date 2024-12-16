@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Masseur Admin</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-gray-100 text-gray-900 p-4">
+        <div class="max-w-lg mx-auto bg-white p-6 rounded shadow">
+            <h1 class="text-2xl font-bold mb-4">Appointments</h1>
+            <ul id="appointmentsList" class="mb-4"></ul>
+            <form id="appointmentForm" class="space-y-2">
+                <input
+                    type="text"
+                    name="customer_name"
+                    placeholder="Customer Name"
+                    class="border p-2 w-full"
+                    required />
+                <input
+                    type="number"
+                    name="duration"
+                    placeholder="Duration (min)"
+                    class="border p-2 w-full"
+                    required />
+                <textarea
+                    name="notes"
+                    placeholder="Notes"
+                    class="border p-2 w-full"></textarea>
+                <button
+                    type="submit"
+                    class="bg-blue-500 text-white p-2 rounded">
+                    Add Appointment
+                </button>
+            </form>
+        </div>
+        <script>
+            async function fetchAppointments() {
+                const res = await fetch("/appointments");
+                const data = await res.json();
+                const list = document.getElementById("appointmentsList");
+                list.innerHTML = "";
+                data.forEach((ap) => {
+                    const li = document.createElement("li");
+                    li.className = "border-b py-2";
+                    li.innerText = `${ap.customer_name} - ${
+                        ap.duration
+                    } min - ${new Date(ap.time).toLocaleString()}`;
+                    list.appendChild(li);
+                });
+            }
+
+            document
+                .getElementById("appointmentForm")
+                .addEventListener("submit", async (e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.target);
+                    const payload = {
+                        customer_name: formData.get("customer_name"),
+                        duration: parseInt(formData.get("duration"), 10),
+                        notes: formData.get("notes"),
+                    };
+                    await fetch("/appointments", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+                    e.target.reset();
+                    fetchAppointments();
+                });
+
+            fetchAppointments();
+        </script>
+    </body>
+</html>

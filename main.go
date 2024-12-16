@@ -11,6 +11,8 @@ import (
 )
 
 func main() {
+    http.Handle("/", http.FileServer(http.Dir("./static")))
+    
     http.HandleFunc("/appointments", appointmentsHandler)
     http.HandleFunc("/appointments/", appointmentHandler)
 
