@@ -27,7 +27,42 @@ func main() {
 func appointmentsHandler(w http.ResponseWriter, r *http.Request) {
     switch r.Method {
         case http.MethodGet:
-            rows, err := database.Query("SELECT id, customer_name, time, duration, notes FROM appointments")
+            queryValues := r.URL.Query()
+            startStr := queryValues.Get("start")
+            endStr := queryValues.Get("end")
+            customer := queryValues.Get("customer")
+            sortField := queryValues.Get("sort")
+
+            baseQuery := "SELECT id, customer_name, time, duration, notes FROM appointments"
+            var conditions []string
+            var args []interface{}
+
+            if startStr != "" && endStr != "" {
+                conditions = append(conditions, "time BETWEEN ? AND ?")
+                args = append(args, startStr, endStr)
+            }
+
+            if customer != "" {
+                conditions = append(conditions, "customer_name LIKE ?")
+                args = append(args, "%"+customer+"%")
+            }
+
+            if len(conditions) > 0 {
+                baseQuery += " WHERE " + strings.Join(conditions, " AND ")
+            }
+
+            allowedSorts := map[string]string {
+                "time": "time",
+                "customer_name": "customer_name",
+                "duration": "duration",
+            }
+            if sortField != "" {
+                if col, ok := allowedSorts[sortField]; ok {
+                    baseQuery += " ORDER BY " + col
+                }
+            }
+
+            rows, err := database.Query(baseQuery, args...)
             if err != nil {
                 http.Error(w, err.Error(), http.StatusInternalServerError)
                 return
@@ -44,15 +79,17 @@ func appointmentsHandler(w http.ResponseWriter, r *http.Request) {
                 }
 
                 parsedTime, err := time.Parse(time.RFC3339, t)
-                if err != nil {
-                    parsedTime = time.Now()
+                if err == nil {
+                    a.Time = parsedTime
+                } else {
+                    a.Time = time.Now()
                 }
-                a.Time = parsedTime
+                
                 result = append(result, a)
             }
-
+        
             w.Header().Set("Content-Type", "application/json")
-            json.NewEncoder(w).Encode(appointments)
+            json.NewEncoder(w).Encode(result)
         case http.MethodPost:
             var a Appointment
             if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
